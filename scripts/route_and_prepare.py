@@ -23,24 +23,47 @@ DEEPSEEK_URL = f"{DEEPSEEK_BASE}/chat/completions"
 DEEPSEEK_TIMEOUT = 300.0
 
 
-def _load_env_file(env_path: str) -> None:
-    """从 .env 文件加载环境变量（不覆盖已有值）。"""
-    if not os.path.exists(env_path):
-        return
-    with open(env_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            key = key.strip()
-            val = val.strip().strip('"').strip("'")
-            if key and key not in os.environ:
-                os.environ[key] = val
+def _get_api_key() -> str:
+    """多路径查找 DEEPSEEK_API_KEY，按优先级：环境变量 > ~/.hermes/.env > 当前目录 .env"""
+    # 1. 环境变量（Windows 用户级/系统级 或 Linux export）
+    key = os.environ.get("DEEPSEEK_API_KEY", "")
+    if key:
+        return key
+
+    # 2. ~/.hermes/.env
+    hermes_env = os.path.join(HERMES_HOME, ".env")
+    if os.path.exists(hermes_env):
+        key = _read_key_from_env_file(hermes_env)
+        if key:
+            return key
+
+    # 3. 当前目录 .env（用户从 GitHub 下载后可能放在这里）
+    local_env = os.path.join(os.getcwd(), ".env")
+    if os.path.exists(local_env):
+        key = _read_key_from_env_file(local_env)
+        if key:
+            return key
+
+    return ""
 
 
-_load_env_file(os.path.join(HERMES_HOME, ".env"))
-DEEPSEEK_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+def _read_key_from_env_file(path: str) -> str:
+    """从 .env 文件中提取 DEEPSEEK_API_KEY。"""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                if k.strip() == "DEEPSEEK_API_KEY":
+                    return v.strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return ""
+
+
+DEEPSEEK_KEY = _get_api_key()
 
 # ── 关键词路由表 ──────────────────────────────
 KNOWLEDGE_ROUTING = {
@@ -247,5 +270,15 @@ if __name__ == "__main__":
     print(f"路由表 {len(KNOWLEDGE_ROUTING)} 个规则")
     print(f"后端 → {DEEPSEEK_URL}")
     if not DEEPSEEK_KEY:
-        print("⚠ DEEPSEEK_API_KEY 未设，转发会失败")
+        print("=" * 60)
+        print("❌ DEEPSEEK_API_KEY 未找到！")
+        print("")
+        print("请用以下任一方式设置：")
+        print("  1. 在当前目录创建 .env 文件，写入：")
+        print("     DEEPSEEK_API_KEY=sk-你的key")
+        print("  2. 设置 Windows 用户环境变量：")
+        print("     setx DEEPSEEK_API_KEY sk-你的key")
+        print("  3. 在 ~/.hermes/.env 中写入同一行")
+        print("=" * 60)
+        exit(1)
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
