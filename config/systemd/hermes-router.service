@@ -1,0 +1,15 @@
+[Unit]
+Description=Hermes 知识路由中间件
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/.hermes/scripts/route_and_prepare.py
+Restart=always
+RestartSec=5
+Environment=HOME=%h
+EnvironmentFile=-%h/.hermes/.env
+
+[Install]
+WantedBy=default.target

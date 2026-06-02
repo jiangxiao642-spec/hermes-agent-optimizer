@@ -1,0 +1,30 @@
+# Hermes 配置示例
+# 复制到 ~/.hermes/config.yaml 后修改
+
+model:
+  provider: deepseek
+  model: deepseek-v4-pro
+  # 核心：指向路由中间件
+  base_url: http://localhost:8000/v1
+  api_key: $DEEPSEEK_API_KEY
+
+# 模型目录（可选多 provider）
+model_catalog:
+  providers:
+    deepseek:
+      name: DeepSeek
+      base_url: https://api.deepseek.com/v1
+      api_key: $DEEPSEEK_API_KEY
+      models:
+        - deepseek-v4-pro
+        - deepseek-v4-flash
+
+# 记忆设置
+memory:
+  char_limit: 80000  # 触发压缩的阈值
+
+# 可选：辅助视觉模型
+auxiliary:
+  vision:
+    provider: dashscope
+    model: qwen-vl-max
