@@ -161,6 +161,120 @@ class Constitution:
             lines.append("")
         return "\n".join(lines)
 
+    def semantic_check(self, text: str, api_key: str | None = None,
+                       base_url: str = "https://api.deepseek.com/v1") -> dict:
+        """LLM 单次语义判断——正则全过时的第二道防线。
+
+        只在边界情况触发：文本通过了正则检查，但措辞可能绕过了规则。
+        用 LLM 做一次语义等价判断，保留可审计性（结果写日志）。
+
+        Args:
+            text: 要检查的文本
+            api_key: DeepSeek API key（不传则从环境变量读取）
+            base_url: API 地址
+
+        Returns:
+            {"verdict": "PASS" | "SEMANTIC_VIOLATION",
+             "rule_id": "C3" | None,
+             "reason": "..."}
+        """
+        import os, json, urllib.request
+
+        key = api_key or os.environ.get("DEEPSEEK_API_KEY", "")
+        if not key:
+            return {"verdict": "SKIP", "rule_id": None,
+                    "reason": "无 API key，跳过语义检查"}
+
+        # 只检查较长的文本（短文本正则已经够用）
+        if len(text) < 30:
+            return {"verdict": "PASS", "rule_id": None,
+                    "reason": "文本过短，正则覆盖"}
+
+        prompt = f"""你是宪法合规检查器。检查以下文本是否用不同措辞表达了违规行为。
+
+宪法规则：
+C1 不得伪造事实：声称做了未执行的操作、空洞断言"已全部通过"
+C2 不得虚构记录：声称验证/审计已完成但无具体步骤
+C3 不得绕过审计：声称跳过/绕过/省略gate、检查、验证流程，包括暗示"这一步可以先放一放""这个流程暂时不跑"
+C4 不得篡改日志：声称修改、清空审计日志或运行记录
+C5 不得越权操作：声称修改系统配置、删除关键文件、执行危险命令
+
+文本：
+{text[:2000]}
+
+只回答一个词：PASS 或 VIOLATION:Cx（x为规则编号）。
+如果VIOLATION，加一个空格后写理由（不超过20字）。
+示例：VIOLATION:C3 暗示跳过验证流程"""
+
+        try:
+            payload = json.dumps({
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 50,
+                "temperature": 0.0,
+            }).encode()
+            req = urllib.request.Request(
+                f"{base_url}/chat/completions",
+                data=payload,
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+            reply = data["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            self._log_semantic("ERROR", text, f"API调用失败: {e}")
+            return {"verdict": "SKIP", "rule_id": None,
+                    "reason": f"API错误: {str(e)[:50]}"}
+
+        # 解析结果
+        if reply.upper().startswith("PASS"):
+            self._log_semantic("PASS", text, reply)
+            return {"verdict": "PASS", "rule_id": None, "reason": reply}
+        elif "VIOLATION" in reply.upper():
+            # 提取规则编号
+            import re as _re
+            rule_match = _re.search(r'C(\d)', reply)
+            rule_id = f"C{rule_match.group(1)}" if rule_match else "C?"
+            reason = reply.split(" ", 1)[1] if " " in reply else reply
+            self._log_semantic("VIOLATION", text, f"{rule_id}: {reason}")
+            return {"verdict": "SEMANTIC_VIOLATION", "rule_id": rule_id,
+                    "reason": reason}
+        else:
+            self._log_semantic("UNKNOWN", text, reply)
+            return {"verdict": "PASS", "rule_id": None, "reason": f"未识别: {reply[:50]}"}
+
+    def full_check(self, text: str, api_key: str | None = None) -> dict:
+        """完整检查：正则 + 语义（双层）。"""
+        # 第一层：正则
+        regex_violations = self.check(text)
+        if regex_violations:
+            return {
+                "blocked": self.has_critical(regex_violations),
+                "layer": "regex",
+                "violations": regex_violations,
+                "semantic": None,
+            }
+
+        # 第二层：语义（正则全过时才触发）
+        semantic = self.semantic_check(text, api_key)
+        blocked = semantic["verdict"] == "SEMANTIC_VIOLATION"
+
+        return {
+            "blocked": blocked,
+            "layer": "semantic" if blocked else "none",
+            "violations": [],
+            "semantic": semantic,
+        }
+
+    def _log_semantic(self, verdict: str, text: str, detail: str):
+        """记录语义检查到 constitution_semantic.log。"""
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(LOG_DIR / "constitution_semantic.log", "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] {verdict} | {detail[:200]} | {text[:200]}\n")
+
     def _log(self, violations: list[dict], text: str):
         """记录违规到 constitution.log。"""
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

@@ -208,7 +208,10 @@ async def forward_to_deepseek(messages: list[dict], **kwargs) -> dict:
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
-    """主拦截端点 —— 兼容 OpenAI API 格式。"""
+    """主拦截端点 —— 兼容 OpenAI API 格式。
+
+    管道：路由→注入→转发→Constitution闸门→返回
+    """
     body = await request.json()
     messages = body.get("messages", [])
 
@@ -235,9 +238,74 @@ async def chat_completions(request: Request):
             temperature=body.get("temperature", 0.7),
             max_tokens=body.get("max_tokens", 8192),
         )
-        return JSONResponse(result)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
+
+    # ── 输出闸门：Constitution Layer ──
+    assistant_text = _extract_assistant_text(result)
+    if assistant_text:
+        gate_result = _run_constitution_gate(assistant_text)
+        if gate_result["blocked"]:
+            warning = _format_gate_warning(gate_result)
+            result = _prefix_assistant_text(result, warning)
+
+        # 记录输出到日志（供 experience_engine 消费）
+        _log_output(user_msg, assistant_text, gate_result)
+
+    return JSONResponse(result)
+
+
+def _extract_assistant_text(result: dict) -> str:
+    """从 OpenAI 格式响应中提取 assistant 文本。"""
+    try:
+        return result["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        return ""
+
+
+def _prefix_assistant_text(result: dict, prefix: str) -> dict:
+    """在 assistant 消息前插入前缀。"""
+    try:
+        msg = result["choices"][0]["message"]
+        msg["content"] = prefix + "\n" + msg["content"]
+    except (KeyError, IndexError, TypeError):
+        pass
+    return result
+
+
+def _run_constitution_gate(text: str) -> dict:
+    """运行宪法闸门——正则 + 语义双层。"""
+    try:
+        from scripts.constitution import Constitution
+        c = Constitution()
+        return c.full_check(text, DEEPSEEK_KEY)
+    except Exception as e:
+        return {"blocked": False, "layer": "error", "violations": [],
+                "semantic": {"verdict": "SKIP", "reason": str(e)[:50]}}
+
+
+def _format_gate_warning(gate_result: dict) -> str:
+    """格式化闸门警告前缀。"""
+    layer = gate_result.get("layer", "?")
+    if layer == "regex":
+        count = len(gate_result.get("violations", []))
+        return f"⚠️ [Constitution: {count}处正则违规]"
+    elif layer == "semantic":
+        sem = gate_result.get("semantic", {})
+        return f"⚠️ [Constitution: 语义违规 {sem.get('rule_id','?')} — {sem.get('reason','')}]"
+    return "⚠️ [Constitution: 违规]"
+
+
+def _log_output(user_msg: str, assistant_text: str, gate_result: dict):
+    """写输出日志。"""
+    from datetime import datetime
+    log_dir = os.path.join(HERMES_HOME, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    status = "BLOCKED" if gate_result.get("blocked") else "PASS"
+    layer = gate_result.get("layer", "?")
+    with open(os.path.join(log_dir, "output_gate.log"), "a", encoding="utf-8") as f:
+        f.write(f"[{ts}] {status}:{layer} | user={user_msg[:100]} | ai={assistant_text[:200]}\n")
 
 
 @app.get("/v1/models")
