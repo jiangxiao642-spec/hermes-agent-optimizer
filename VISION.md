@@ -53,13 +53,15 @@ Claim → Evidence → Evidence Quality → Knowledge State → Output Policy
 
 ---
 
-## P1 — 宪法与锚点 ⬜ 设计阶段
+## P1 — 宪法与锚点 🟡 部分完成
 
-### Mission Anchor + Goal Drift Detector
+### Mission Anchor + Goal Drift Detector (`mission.py`) ✅ 已落地
 
-长期任务持续对齐初始目标。每隔 N 步计算偏离度，超过阈值触发重新规划。
+长期任务持续对齐初始目标。三维锚点（成功标准/行为约束/禁止事项），约束违反计数量化漂移。
+Mission 结构化为带版本号+父版本链+变更原因+确认者的对象。
 
-"每一步都正确，最终结果错误" — 这是长期任务最致命的失败模式。
+六状态生命周期：DRAFT→ACTIVE→DEVIATING→REALIGNED/ABANDONED/VOLATILE。
+变动率检测：7天内≥3次变更 → 上游需求不稳定。
 
 ### Constitution Layer
 
