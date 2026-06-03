@@ -136,7 +136,30 @@ def trigger_agentmemory_forget(dry_run=False):
         log(f"agentmemory auto-forget: 连接失败 ({e})")
 
 
+def extract_rules() -> list:
+    """读取 experience/rules.json，返回提炼的经验规则。"""
+    rules_path = HERMES_HOME / "experience" / "rules.json"
+    if not rules_path.exists():
+        return []
+    try:
+        with open(rules_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return []
+    return data.get("rules", [])
+
+
 def main():
+    if "--extract" in sys.argv:
+        rules = extract_rules()
+        if rules:
+            print("[forget] 经验规则:")
+            for r in rules:
+                print(f"  IF {r['condition']} THEN {r['action']} ({r['confidence']:.0%})")
+        else:
+            print("[forget] 无经验规则（先跑 experience_engine.py rules）")
+        return
+
     dry_run = "--dry-run" in sys.argv
 
     if dry_run:

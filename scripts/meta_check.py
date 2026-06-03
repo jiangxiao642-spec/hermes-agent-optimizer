@@ -146,5 +146,70 @@ def main():
         print("[meta_check] ✅ 无违规")
 
 
+def adjust_gates() -> dict:
+    """读取 experience/thresholds.json，返回推荐的阈值调整。"""
+    thresholds_path = Path.home() / ".hermes" / "experience" / "thresholds.json"
+    if not thresholds_path.exists():
+        return {}
+
+    try:
+        with open(thresholds_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+
+    adjustments = {}
+    for t in data.get("thresholds", []):
+        adjustments[t["violation_type"]] = {
+            "old_level": t["old_level"],
+            "new_level": t["new_level"],
+            "reason": t.get("reason", ""),
+        }
+    return adjustments
+
+
+def main():
+    import sys as _sys
+    session_id = None
+    for i, arg in enumerate(_sys.argv):
+        if arg == "--session" and i + 1 < len(_sys.argv):
+            session_id = _sys.argv[i + 1]
+        if arg == "--adjust":
+            adj = adjust_gates()
+            if adj:
+                print("[meta_check] 推荐阈值调整:")
+                for vtype, info in adj.items():
+                    print(f"  {vtype}: {info['old_level']}→{info['new_level']} ({info['reason']})")
+            else:
+                print("[meta_check] 无阈值调整建议（先跑 experience_engine.py thresholds）")
+            return
+
+    if not session_id:
+        session_id = get_current_session()
+
+    if not session_id:
+        print("[meta_check] ⚠ 无活跃 session")
+        return
+
+    print(f"[meta_check] 检查 session: {session_id[:30]}...")
+
+    events = get_tool_calls(session_id)
+    violations = check_compliance(events)
+
+    if violations:
+        print(f"[meta_check] ❌ 发现 {len(violations)} 处违规:")
+        for v in violations:
+            print(f"  • {v}")
+
+        timestamp = datetime.now().strftime("%m-%d %H:%M")
+        msg = f"[{timestamp}] ⚠ 元认知跳过: {'; '.join(violations)}"
+        PENDING_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(PENDING_FILE, "a", encoding="utf-8") as f:
+            f.write(msg + "\n")
+        print(f"[meta_check] 已记录到 pending")
+    else:
+        print("[meta_check] ✅ 无违规")
+
+
 if __name__ == "__main__":
     main()

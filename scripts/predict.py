@@ -265,6 +265,31 @@ def stats():
     print(f"[predict] 偏差 {deviated} 条，准确率 {accuracy:.0f}%")
 
 
+def learn() -> dict:
+    """读取 experience/factors.json，返回修正因子字典。
+    下次 record() 时自动加载，调整初始置信度。
+
+    Returns:
+        {"文件操作": 0.65, "配置": 0.80, ...}  # 各领域的置信度乘数
+    """
+    factors_path = Path.home() / ".hermes" / "experience" / "factors.json"
+    if not factors_path.exists():
+        return {}
+
+    try:
+        with open(factors_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+
+    multipliers = {}
+    for f in data.get("factors", []):
+        if f.get("type") == "overconfidence":
+            multipliers[f["domain"]] = f.get("multiplier", 1.0)
+
+    return multipliers
+
+
 def main():
     if len(sys.argv) < 2:
         print("预测编码闭环工具")
@@ -302,6 +327,15 @@ def main():
 
     elif cmd == "stats":
         stats()
+
+    elif cmd == "learn":
+        multipliers = learn()
+        if multipliers:
+            print("[predict] 经验修正因子:")
+            for domain, mult in multipliers.items():
+                print(f"  {domain}: ×{mult:.2f}")
+        else:
+            print("[predict] 无经验修正因子（先跑 experience_engine.py factors）")
 
     else:
         print(f"未知命令: {cmd}")
