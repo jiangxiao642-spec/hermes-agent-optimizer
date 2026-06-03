@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """Gate — 任务类型前置路由器。
 
-第一个工具调用必须过此门。
-输出类型 + skill链 + 第一动作。
+优先级裁决：多类型命中取最高优先级（数字越小越优先）。
+同优先级取最长关键词匹配。
+
+用法：
+  echo "优化规则" | python3 gate.py
+  python3 gate.py "帮我写一个CAD绘图脚本"
 """
 
 import sys
+from collections import defaultdict
 
 
 TYPES = {
     "一": {
         "name": "CAD",
+        "priority": 3,
         "trigger": [
             "画图", "出图", "平面图", "剖面图", "DXF", "ezdxf", "CAD",
             "AutoCAD", "识图", "仿制", "建筑图", "轴线", "墙体", "门窗",
@@ -21,6 +27,7 @@ TYPES = {
     },
     "二": {
         "name": "桌面GUI",
+        "priority": 3,
         "trigger": [
             "点击", "截图", "自动化", "桌面操作", "鼠标", "键盘",
             "识别按钮", "操作Windows", "窗口", "桌面控制",
@@ -30,24 +37,28 @@ TYPES = {
     },
     "三A": {
         "name": "内容创作",
+        "priority": 5,
         "trigger": ["小说", "写作", "章节", "创作", "文案"],
         "skills": ["humanizer"],
         "first": "humanizer",
     },
     "三B": {
         "name": "视频脚本",
+        "priority": 5,
         "trigger": ["B站", "视频", "脚本", "选题", "打分", "预测", "复盘", "拍", "发布"],
         "skills": ["cheat-on-content", "humanizer"],
         "first": "cheat-on-content",
     },
     "三C": {
         "name": "文案去AI味",
+        "priority": 6,
         "trigger": ["去AI味", "人话", "改写成", "自然语气"],
         "skills": ["humanizer"],
         "first": "humanizer",
     },
     "四": {
         "name": "复杂任务/编码",
+        "priority": 2,
         "trigger": [
             "多步骤", "拆解", "复杂", "项目", "整个流程",
             "优化", "重构", "实现", "开发", "搭建",
@@ -57,6 +68,7 @@ TYPES = {
     },
     "五": {
         "name": "信息获取",
+        "priority": 1,
         "trigger": [
             "搜索", "查一下", "搜一下", "找资料", "网页",
             "抓取", "提取", "论文",
@@ -66,6 +78,7 @@ TYPES = {
     },
     "六": {
         "name": "打包/安装",
+        "priority": 4,
         "trigger": [
             "打包", "压缩包", "安装器", "exe", "Electron",
             "asar", "安装包", "forge", "桌面壳", "ZIP",
@@ -75,6 +88,7 @@ TYPES = {
     },
     "七": {
         "name": "规则进化",
+        "priority": 7,
         "trigger": [
             "优化规则", "修改原则", "加固", "新增规则",
             "自我迭代", "规则提案", "改自己的规则", "固化教训",
@@ -109,12 +123,22 @@ CODE_PATTERNS = [
     "写个", "做个", "搭个", "改个", "帮我写个", "帮我做个",
 ]
 
+# 优先级定义（数字越小越优先）
+PRIORITY_CODE_PAIR = 9   # 最高 — 明确的编码意图
+PRIORITY_TECH_QA = 0     # 最低 — "是什么"类兜底
 
-def match(task: str) -> tuple:
-    """返回 (类型代号, 类型名, skill列表, 第一动作)"""
+
+def match(task: str) -> dict:
+    """返回完整匹配结果，含置信度。
+
+    Returns:
+        {"tid": "七", "name": "规则进化", "skills": [...], "first": "...",
+         "confidence": 2, "matched_keywords": ["优化规则", "加固"],
+         "is_modify": False, "runners_up": [("四", "优化", 1), ...]}
+    """
     task_lower = task.lower()
 
-    # 先扫编码意图组合
+    # ── 1. 编码意图组合（最高优先级）─────────────────
     has_action = any(a in task for a in CODE_PAIRS["actions"])
     has_target = any(t in task for t in CODE_PAIRS["targets"])
     has_pattern = any(p in task for p in CODE_PATTERNS)
@@ -122,29 +146,56 @@ def match(task: str) -> tuple:
         t = TYPES["四"]
         modify_hints = ["改", "修", "优化", "重构", "整理", "提取", "移到", "移动"]
         is_modify = any(h in task for h in modify_hints)
-        return ("四", t["name"], t["skills"], t["first"], is_modify)
+        return {
+            "tid": "四", "name": t["name"],
+            "skills": t["skills"], "first": t["first"],
+            "confidence": PRIORITY_CODE_PAIR,
+            "matched_keywords": ["编码意图组合"],
+            "is_modify": is_modify,
+            "runners_up": [],
+        }
 
-    # 按类型匹配
+    # ── 2. 全类型扫描，收集所有命中 ──────────────────
+    hits = []  # [(tid, keyword, keyword_len, priority)]
     for tid, info in TYPES.items():
-        if tid.startswith("三"):
-            continue
+        priority = info.get("priority", 0)
         for kw in info["trigger"]:
-            if kw in task_lower or kw in task:
-                return (tid, info["name"], info["skills"], info["first"], False)
+            if kw in task_lower:
+                hits.append((tid, kw, len(kw), priority))
 
-    # 子类型三
-    for stype in ["三A", "三B", "三C"]:
-        info = TYPES[stype]
-        for kw in info["trigger"]:
-            if kw in task_lower or kw in task:
-                return (stype, info["name"], info["skills"], info["first"], False)
+    if not hits:
+        # 技术问答兜底
+        technical_hints = ["是什么", "什么意思", "区别", "怎么用", "为什么", "报错", "错误"]
+        if any(h in task for h in technical_hints):
+            return {
+                "tid": "技术问答", "name": "技术问答",
+                "skills": ["verify-before-answer"], "first": "verify-before-answer",
+                "confidence": PRIORITY_TECH_QA,
+                "matched_keywords": [h for h in technical_hints if h in task],
+                "is_modify": False, "runners_up": [],
+            }
+        return {
+            "tid": "—", "name": "聊天/未分类",
+            "skills": [], "first": None,
+            "confidence": 0,
+            "matched_keywords": [],
+            "is_modify": False, "runners_up": [],
+        }
 
-    # 不匹配 → 判断是不是技术问答
-    technical_hints = ["是什么", "什么意思", "区别", "怎么用", "为什么", "报错", "错误"]
-    if any(h in task for h in technical_hints):
-        return ("技术问答", "技术问答", ["verify-before-answer"], "verify-before-answer", False)
+    # ── 3. 裁决：优先级 > 关键词长度 ──────────────────
+    hits.sort(key=lambda x: (-x[3], -x[2]))  # priority desc, kw_len desc
+    best = hits[0]
+    runners_up = [(tid, kw, priority) for tid, kw, _, priority in hits[1:4]]
 
-    return ("—", "聊天/未分类", [], None, False)
+    t = TYPES[best[0]]
+    return {
+        "tid": best[0], "name": t["name"],
+        "skills": t["skills"], "first": t["first"],
+        "confidence": len(hits),  # 命中关键词数量 = 置信度
+        "matched_keywords": [kw for _, kw, _, _ in hits],
+        "is_modify": False,
+        "runners_up": runners_up,
+    }
 
 
 def main():
@@ -154,15 +205,19 @@ def main():
         print("=== GATE === 空输入")
         return
 
-    tid, name, skills, first, is_modify = match(task)
+    result = match(task)
 
     print("=== GATE ===")
     print(f"任务: {task[:120]}")
-    print(f"类型: {tid}（{name}）")
-    if skills:
-        print(f"Skill链: {' → '.join(skills)}")
-        print(f"第一动作: skill_view {first}")
-        if is_modify:
+    print(f"类型: {result['tid']}（{result['name']}）")
+    print(f"置信度: {result['confidence']}（命中关键词: {', '.join(result['matched_keywords'][:5])}）")
+    if result["runners_up"]:
+        ru = ", ".join(f"{tid}({kw})" for tid, kw, _ in result["runners_up"])
+        print(f"次选: {ru}")
+    if result["skills"]:
+        print(f"Skill链: {' → '.join(result['skills'])}")
+        print(f"第一动作: skill_view {result['first']}")
+        if result["is_modify"]:
             print("🔧 检测到改代码意图 → 改之前先列清单 + 跑 graphify affected")
     else:
         print("操作: 无skill链，直接回复")
