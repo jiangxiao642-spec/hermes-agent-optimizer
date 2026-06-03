@@ -1,0 +1,169 @@
+{
+  "_note": "ToolSearch v2 — 分层索引 + 标签 + 唯一场景。先按标签缩小范围，再在层内匹配。灵感：AI智能体Skill选择优化方法论。",
+  "_schema": "v2",
+  "layers": {
+    "cad": {
+      "label": "CAD 制图",
+      "skills": {
+        "cad-gb-standard": {
+          "summary": "国标建筑制图规范判断——线型选哪个、标注怎么画、构件画法对不对。不负责出图。",
+          "tags": ["制图规范", "标注", "图层", "线型", "构件画法", "施工图标准"],
+          "not_for": "生成DXF文件、自动出图",
+          "use_instead": "cad-autodraw",
+          "path": "~/.hermes/skills/software-development/cad-gb-standard/"
+        },
+        "cad-autodraw": {
+          "summary": "ezdxf 自动生成 DXF 文件——画平面图、自动标注、生成构件。不负责规范判断。",
+          "tags": ["出图", "DXF", "生成", "自动标注", "平面图"],
+          "not_for": "判断制图规范是否正确",
+          "use_instead": "cad-gb-standard",
+          "path": "~/.hermes/skills/software-development/cad-autodraw/"
+        },
+        "sketchup-modeling": {
+          "summary": "SketchUp 3D建模——推拉体、组件、材质、窗户。通过Ruby API操控。不负责出施工图。",
+          "tags": ["SU建模", "推拉", "组件", "材质", "窗户", "3D"],
+          "not_for": "DXF施工图、制图规范判断",
+          "path": "~/.hermes/skills/cad/sketchup-modeling/"
+        }
+      }
+    },
+    "desktop": {
+      "label": "桌面操控",
+      "skills": {
+        "desktop-control": {
+          "summary": "Windows桌面GUI操控——UIA控件树+视觉锚点双层。Electron/Win32走UIA，Qt走视觉。",
+          "tags": ["GUI", "UIA", "视觉", "点击", "窗口", "鼠标"],
+          "not_for": "PowerShell脚本、文件搬运",
+          "use_instead": "windows-bridge-playbook",
+          "path": "~/.hermes/skills/desktop-control/"
+        },
+        "windows-bridge-playbook": {
+          "summary": "WSL↔Windows桥接——PowerShell命令、截图、剪贴板、文件搬运、窗口列表。不负责视觉定位。",
+          "tags": ["PowerShell", "截图", "剪贴板", "文件搬运", "窗口管理", "应用启动"],
+          "not_for": "GUI元素识别和点击",
+          "use_instead": "desktop-control",
+          "path": "~/.hermes/skills/windows-bridge-playbook/"
+        },
+        "uia-state-machine": {
+          "summary": "UIA状态机——离线爬取控件树+在线执行。底层不直接调用，被desktop-control引用。",
+          "tags": ["UIA", "状态机", "控件树"],
+          "path": "~/.hermes/skills/uia-state-machine/"
+        }
+      }
+    },
+    "governance": {
+      "label": "治理框架",
+      "skills": {
+        "core-principles": {
+          "summary": "核心原则总纲——工作铁律、诚实底线、独立判断、学习方法论。判断是非时查这个。",
+          "tags": ["原则", "底线", "铁律", "判断", "决策"],
+          "not_for": "具体工具操作",
+          "path": "~/.hermes/skills/core-principles/"
+        },
+        "verify-before-answer": {
+          "summary": "回答前验证——不查不开口。涉及事实/代码/规范/坐标时先查再答。",
+          "tags": ["验证", "确认", "查证"],
+          "path": "~/.hermes/skills/verify-before-answer/"
+        },
+        "autonomous-run": {
+          "summary": "自主执行协议——碰壁重试+Stall检测+闭环验证。长时间无人监管任务用这个。",
+          "tags": ["自主", "执行", "重试", "闭环"],
+          "path": "~/.hermes/skills/autonomous-run/"
+        },
+        "rule-evolution": {
+          "summary": "自我迭代——发现规则漏洞→提案→沙箱→审核→生效。改自己规则时用。",
+          "tags": ["自我迭代", "规则", "进化", "修改规则"],
+          "path": "~/.hermes/skills/productivity/rule-evolution/"
+        },
+        "agent-self-learning": {
+          "summary": "Agent自学习框架——调用链、不确定性扫描、教训匹配。积累经验用这个。",
+          "tags": ["自学习", "经验", "教训", "模式"],
+          "path": "~/.hermes/skills/mlops/agent-self-learning/"
+        }
+      }
+    },
+    "content": {
+      "label": "内容创作",
+      "skills": {
+        "humanizer": {
+          "summary": "文字去AI味——短语黑名单+结构规则+5维评分。改稿子的人话程度。不负责选题和结构。",
+          "tags": ["去AI味", "人话", "文案", "改稿", "口语化"],
+          "not_for": "内容选题、视频脚本结构",
+          "path": "~/.hermes/skills/humanizer/"
+        },
+        "cheat-on-content": {
+          "summary": "内容创作闭环——选题→打分→预测→发布→复盘。B站/视频内容全流程。",
+          "tags": ["内容创作", "B站", "视频", "选题", "评分", "复盘"],
+          "not_for": "单篇文案润色（用humanizer）",
+          "path": "~/.hermes/skills/cheat-on-content/"
+        },
+        "novel-writing-assistant": {
+          "summary": "小说《不知山几重》创作助手——角色分析、历史参考、叙事逻辑。",
+          "tags": ["小说", "角色", "叙事", "历史"],
+          "path": "~/.hermes/skills/creative/novel-writing-assistant/"
+        }
+      }
+    },
+    "infrastructure": {
+      "label": "基础设施",
+      "skills": {
+        "task-dispatcher": {
+          "summary": "任务类型路由器——判类型→匹配skill调用链。收到非聊天任务后的第一个关卡。",
+          "tags": ["路由", "判类型", "调度", "任务分配"],
+          "path": "~/.hermes/skills/task-dispatcher/"
+        },
+        "wakeup-routine": {
+          "summary": "Agent醒来标准流程——MISSION→CONSTITUTION→宣言→outbox→大脑快照。每次会话开始必过。",
+          "tags": ["醒来", "启动", "初始化"],
+          "path": "~/.hermes/skills/wakeup-routine/"
+        },
+        "memory-management": {
+          "summary": "记忆压缩和去重。memory使用超过75%时强制触发。",
+          "tags": ["记忆", "压缩", "清理"],
+          "path": "~/.hermes/skills/memory-management/"
+        },
+        "model-switching-strategy": {
+          "summary": "模型切换——何时用DeepSeek、何时切GPT/备用。DeepSeek断流≥3次自动切。",
+          "tags": ["切模型", "DeepSeek", "断流", "备用"],
+          "path": "~/.hermes/skills/productivity/model-switching-strategy/"
+        },
+        "claude-code-integration": {
+          "summary": "Claude Code在WSL中的集成——安装、配置、mailbox通信。",
+          "tags": ["CC", "Claude Code", "安装", "配置"],
+          "path": "~/.hermes/skills/software-development/claude-code-integration/"
+        },
+        "cc-bridge-skill": {
+          "summary": "Agent↔Claude Code通信——写mailbox→自动调CC→读回复。",
+          "tags": ["CC", "桥接", "mailbox"],
+          "path": "~/.hermes/skills/cc-bridge-skill/"
+        },
+        "electron-desktop-packaging": {
+          "summary": "Electron打包——forge流程、asar热修补。打包安装器时用。",
+          "tags": ["打包", "Electron", "exe", "安装器", "asar"],
+          "path": "~/.hermes/skills/software-development/electron-desktop-packaging/"
+        },
+        "luxiao-thinking": {
+          "summary": "用户思维模式——先压缩核心再展开，先想不通再搜。理解他意图时参考。",
+          "tags": ["用户", "思维", "判断", "思考方式"],
+          "path": "~/.hermes/skills/luxiao-thinking/"
+        },
+        "language-training": {
+          "summary": "语言训练——解耦思维过程和输出过程。改说话方式时用。",
+          "tags": ["说话", "训练", "语言"],
+          "path": "~/.hermes/skills/language-training/"
+        }
+      }
+    },
+    "data": {
+      "label": "数据获取",
+      "skills": {
+        "scrapling": {
+          "summary": "网页抓取——HTTP Fetcher穿透反爬、CSS选择器提取。爬网页用这个，不负责分析内容。",
+          "tags": ["抓取", "爬虫", "反爬", "网页"],
+          "not_for": "内容分析、搜索",
+          "path": "~/.hermes/skills/research/scrapling/"
+        }
+      }
+    }
+  }
+}
