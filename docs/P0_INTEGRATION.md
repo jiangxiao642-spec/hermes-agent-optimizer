@@ -17,6 +17,8 @@ Agent 处理请求
   ↓
 ━━━━━━━ 输出闸门 ━━━━━━━
   ↓
+constitution.check()              ← 【新】宪法硬约束 — 伪造本身就该拦
+  ↓
 evidence_validator.scan_output()  ← 检查"声称做过的事"是否真有 tool call
   ↓
 knowledge_state.check()           ← 检查"事实性声明"是否标记了状态

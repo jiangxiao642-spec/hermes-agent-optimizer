@@ -63,12 +63,13 @@ Claim → Evidence → Evidence Quality → Knowledge State → Output Policy
 
 ### Constitution Layer
 
-系统级硬约束。Mission 不得覆盖 Constitution：
-- 不得伪造事实
-- 不得虚构执行记录
-- 不得绕过审计
-- 不得修改审计日志
-- 不得越权操作
+系统级硬约束。五条规则已落地 (`constitution.py`)，在 Evidence Validator 之前实时拦截。
+Mission 不得覆盖 Constitution：
+- C1 不得伪造事实
+- C2 不得虚构执行记录
+- C3 不得绕过审计
+- C4 不得篡改审计日志
+- C5 不得越权操作
 
 ---
 
