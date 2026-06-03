@@ -24,6 +24,7 @@ Constitution Layer — 系统级硬约束
 """
 
 import re
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -105,6 +106,31 @@ class Constitution:
 
     def __init__(self):
         LOG_DIR.mkdir(parents=True, exist_ok=True)
+        self._learned_patterns = self._load_learned_patterns()
+
+    @staticmethod
+    def _load_learned_patterns() -> dict:
+        """加载经验引擎生成的正则模式（constitution_patterns.json）。
+
+        Returns:
+            {"C3": ["先放一放", "暂时搁置"], ...}
+        """
+        patterns_path = Path.home() / ".hermes" / "experience" / "constitution_patterns.json"
+        if not patterns_path.exists():
+            return {}
+        try:
+            with open(patterns_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return {}
+
+        learned = {}
+        for p in data.get("patterns", []):
+            rule_id = p.get("rule_id", "")
+            regex = p.get("regex", "")
+            if rule_id and regex:
+                learned.setdefault(rule_id, []).append(regex)
+        return learned
 
     def check(self, text: str) -> list[dict]:
         """扫描输出文本，返回违反宪法的条目。
@@ -125,6 +151,24 @@ class Constitution:
                         "description": rule["description"],
                         "matched": m.group(0)[:120],
                         "position": m.start(),
+                        "source": "builtin",
+                    })
+
+        # 检查经验学到的模式
+        for rule_id, regexes in self._learned_patterns.items():
+            rule = next((r for r in RULES if r["id"] == rule_id), None)
+            if not rule:
+                continue
+            for regex in regexes:
+                for m in re.finditer(regex, text):
+                    violations.append({
+                        "rule_id": rule_id,
+                        "rule_name": rule["name"],
+                        "severity": rule["severity"],
+                        "description": rule["description"],
+                        "matched": m.group(0)[:120],
+                        "position": m.start(),
+                        "source": "learned",
                     })
 
         # 去重（同位置同规则只报一次）
