@@ -37,7 +37,8 @@ from enum import Enum
 
 
 class State(Enum):
-    VERIFIED = "VERIFIED"
+    VERIFIED_HIGH = "VERIFIED_HIGH"    # 直接证据（DIRECT）
+    VERIFIED_LOW = "VERIFIED_LOW"      # 间接证据（FUZZY/INDIRECT）
     INFERRED = "INFERRED"
     HYPOTHESIS = "HYPOTHESIS"
     UNKNOWN = "UNKNOWN"
@@ -50,19 +51,20 @@ DEFAULT_FILE = DEFAULT_DIR / "items.jsonl"
 
 # ── 输出规则 ──────────────────────────
 OUTPUT_RULES = {
-    "VERIFIED": "允许作为事实陈述",
+    "VERIFIED_HIGH": "允许作为事实陈述（直接证据）",
+    "VERIFIED_LOW": "允许陈述但建议标注证据质量（间接证据）",
     "INFERRED": "必须声明为推测（'基于X推断Y'）",
     "HYPOTHESIS": "必须声明为假设（'假设X成立，则Y'）",
     "UNKNOWN": "必须承认不知道",
 }
 
 # ── 禁止转换 ──────────────────────────
-# source_state -> target_state: 是否允许
 TRANSITION_ALLOWED = {
-    "UNKNOWN": {"VERIFIED": False, "INFERRED": False, "HYPOTHESIS": True, "UNKNOWN": True},
-    "HYPOTHESIS": {"VERIFIED": False, "INFERRED": True, "HYPOTHESIS": True, "UNKNOWN": False},
-    "INFERRED": {"VERIFIED": True, "INFERRED": True, "HYPOTHESIS": False, "UNKNOWN": False},
-    "VERIFIED": {"VERIFIED": True, "INFERRED": False, "HYPOTHESIS": False, "UNKNOWN": False},
+    "UNKNOWN": {"VERIFIED_HIGH": False, "VERIFIED_LOW": False, "INFERRED": False, "HYPOTHESIS": True, "UNKNOWN": True},
+    "HYPOTHESIS": {"VERIFIED_HIGH": False, "VERIFIED_LOW": False, "INFERRED": True, "HYPOTHESIS": True, "UNKNOWN": False},
+    "INFERRED": {"VERIFIED_HIGH": True, "VERIFIED_LOW": True, "INFERRED": True, "HYPOTHESIS": False, "UNKNOWN": False},
+    "VERIFIED_LOW": {"VERIFIED_HIGH": True, "VERIFIED_LOW": True, "INFERRED": False, "HYPOTHESIS": False, "UNKNOWN": False},
+    "VERIFIED_HIGH": {"VERIFIED_HIGH": True, "VERIFIED_LOW": True, "INFERRED": False, "HYPOTHESIS": False, "UNKNOWN": False},
 }
 
 # ── 事实性声明检测模式 ─────────────────

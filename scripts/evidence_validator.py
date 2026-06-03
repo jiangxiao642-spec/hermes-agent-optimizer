@@ -90,7 +90,14 @@ IGNORE_CLAIMS = [
 
 
 class EvidenceValidator:
-    """证据验证器 — 所有事实声明必须有 tool call 记录。"""
+    """证据验证器 — 所有事实声明必须有 tool call 记录。
+
+    证据质量分级（Evidence ≠ Truth）：
+      DIRECT    — 参数精确匹配，confidence 0.95
+      FUZZY     — 子串模糊匹配，confidence 0.60
+      INDIRECT  — 工具类型对但参数不匹配，或仅有外部引用, confidence 0.30
+      NONE      — 无匹配，confidence 0.0
+    """
 
     def __init__(self, db_path: Path | None = None):
         self.db_path = db_path or STATE_DB
@@ -101,7 +108,9 @@ class EvidenceValidator:
         """验证一条声明是否有对应的 tool call 记录。
 
         Returns:
-            {"pass": bool, "claim": str, "matched_tool": str | None,
+            {"pass": bool, "claim": str,
+             "evidence_quality": "DIRECT"|"FUZZY"|"INDIRECT"|"NONE",
+             "confidence": 0.0-0.95, "matched_tool": str | None,
              "evidence": [str], "issue": str | None}
         """
         # 找到这条声明匹配的 tool 类型
@@ -115,53 +124,58 @@ class EvidenceValidator:
                 break
 
         if not matched_rule:
-            # 没匹配到任何声明模式 → 不是事实性声明，放行
             return {"pass": True, "claim": claim, "matched_tool": None,
-                    "evidence": [], "issue": None, "note": "非事实性声明"}
+                    "evidence": [], "issue": None, "note": "非事实性声明",
+                    "evidence_quality": "DIRECT", "confidence": 1.0}
 
         # 从 session 中查 tool call 历史
         tool_calls = self._get_session_tool_calls(session_id)
-
-        # 尝试匹配
         param_hint = matched_rule["param_extractor"](match_obj) if matched_rule["param_field"] else ""
         target_tools = matched_rule["tools"]
 
+        # 精确匹配
         for tc in tool_calls:
             if "*" in target_tools or tc["name"] in target_tools:
-                # 参数模糊匹配
                 if matched_rule["param_field"] and param_hint:
                     params = tc.get("params", "")
+                    if self._exact_match(param_hint, params):
+                        return self._result(True, claim, tc["name"],
+                            [f"{tc['name']}:{params[:80]}"], None, "DIRECT", 0.95)
                     if self._fuzzy_match(param_hint, params):
-                        return {
-                            "pass": True,
-                            "claim": claim,
-                            "matched_tool": tc["name"],
-                            "evidence": [f"{tc['name']}:{params[:80]}"],
-                            "issue": None,
-                        }
+                        return self._result(True, claim, tc["name"],
+                            [f"{tc['name']}:{params[:80]}"], None, "FUZZY", 0.60)
                 elif "*" in target_tools:
-                    # 外部引用——只要有任何 tool call 就算有证据
-                    return {
-                        "pass": True,
-                        "claim": claim,
-                        "matched_tool": tc["name"],
-                        "evidence": [f"{tc['name']}:{tc.get('params', '')[:80]}"],
-                        "issue": None,
-                    }
+                    return self._result(True, claim, tc["name"],
+                        [f"{tc['name']}:{tc.get('params', '')[:80]}"],
+                        None, "INDIRECT", 0.30)
 
-        # 没找到匹配
-        return {
-            "pass": False,
-            "claim": claim,
-            "matched_tool": target_tools[0] if target_tools else None,
-            "evidence": [],
-            "issue": f"FABRICATED: 声称执行了 {target_tools} 但 session 中无匹配记录",
-        }
+        # 工具类型匹配但参数不匹配 → 间接证据
+        for tc in tool_calls:
+            if tc["name"] in target_tools:
+                return self._result(True, claim, tc["name"],
+                    [f"{tc['name']}:{tc.get('params', '')[:80]}"],
+                    "INDIRECT_MATCH: 工具类型正确但参数不匹配", "INDIRECT", 0.30)
+
+        # 完全没匹配
+        return self._result(False, claim,
+            target_tools[0] if target_tools else None,
+            [],
+            f"FABRICATED: 声称执行了 {target_tools} 但 session 中无匹配记录",
+            "NONE", 0.0)
+
+    @staticmethod
+    def _result(pass_val, claim, tool, evidence, issue, quality, confidence):
+        return {"pass": pass_val, "claim": claim, "matched_tool": tool,
+                "evidence": evidence, "issue": issue,
+                "evidence_quality": quality, "confidence": confidence}
 
     # ── 批量扫描 ────────────────────
 
-    def scan_output(self, text: str, session_id: str) -> list[dict]:
+    def scan_output(self, text: str, session_id: str,
+                    min_confidence: float = 0.30) -> list[dict]:
         """扫描整个输出，提取所有事实性声明并逐条验证。
+
+        min_confidence: 低于此阈值的声明视为违规。默认 0.30（至少 INDIRECT）。
 
         Returns:
             违规列表。空列表 = 全部通过。
@@ -171,7 +185,7 @@ class EvidenceValidator:
 
         for claim in claims:
             result = self.validate_claim(claim, session_id)
-            if not result["pass"]:
+            if result["confidence"] < min_confidence:
                 violations.append(result)
 
         return violations
@@ -181,14 +195,18 @@ class EvidenceValidator:
     def get_evidence_chain(self, claim: str, session_id: str) -> list[dict]:
         """回溯完整证据链——从声明追溯到原始 tool call 及其上下文。"""
         result = self.validate_claim(claim, session_id)
-        if not result["pass"]:
-            return [{"level": "claim", "content": claim, "status": "UNVERIFIED"}]
+        quality = result.get("evidence_quality", "NONE")
+        confidence = result.get("confidence", 0.0)
 
-        # 找到匹配的 tool call
+        if quality == "NONE":
+            return [{"level": "claim", "content": claim,
+                     "status": f"UNVERIFIED ({quality})"}]
+
         tool_name = result["matched_tool"]
         tool_calls = self._get_session_tool_calls(session_id)
 
-        chain = [{"level": "claim", "content": claim, "status": "VERIFIED"}]
+        chain = [{"level": "claim", "content": claim,
+                  "status": f"VERIFIED_{quality} ({confidence:.0%})"}]
 
         for tc in tool_calls:
             if tc["name"] == tool_name:
@@ -263,7 +281,18 @@ class EvidenceValidator:
 
         return claims
 
-    # ── 内部：模糊匹配 ──────────────
+    # ── 内部：匹配 ──────────────
+
+    @staticmethod
+    def _exact_match(hint: str, params: str) -> bool:
+        """精确匹配：hint 作为完整词出现在 params 中。"""
+        if not hint or not params:
+            return False
+        hint_clean = re.sub(r'[「」《》\s]', '', hint)
+        if len(hint_clean) < 3:
+            return False
+        # 完整路径/命令名匹配
+        return hint_clean in params
 
     @staticmethod
     def _fuzzy_match(hint: str, params: str) -> bool:
@@ -315,12 +344,14 @@ def main():
     if cmd == "validate":
         claim = " ".join(sys.argv[2:]).replace(" --session " + session_id, "").strip()
         result = ev.validate_claim(claim, session_id)
+        quality = result.get("evidence_quality", "?")
+        conf = result.get("confidence", 0)
         if result["pass"]:
-            print(f"✅ {result.get('note', '通过')}")
+            print(f"✅ {quality} ({conf:.0%}) {result.get('note', '')}")
             if result["evidence"]:
                 print(f"   证据: {result['evidence']}")
         else:
-            print(f"❌ {result['issue']}")
+            print(f"❌ {quality} ({conf:.0%}) {result['issue']}")
 
     elif cmd == "scan":
         text = " ".join(sys.argv[2:]).replace(" --session " + session_id, "").strip()
@@ -328,12 +359,12 @@ def main():
             text = sys.stdin.read().strip()
         violations = ev.scan_output(text, session_id)
         if violations:
-            print(f"发现 {len(violations)} 处无证据声明:")
+            print(f"发现 {len(violations)} 处低置信度声明 (<0.30):")
             for v in violations:
-                print(f"  ❌ {v['claim'][:60]}")
+                print(f"  ❌ [{v.get('evidence_quality','?')}] {v['claim'][:60]}")
                 print(f"     {v['issue']}")
         else:
-            print("✅ 所有声明有证据支撑")
+            print("✅ 所有声明有证据支撑 (≥INDIRECT)")
 
     elif cmd == "chain":
         claim = " ".join(sys.argv[2:]).replace(" --session " + session_id, "").strip()
