@@ -82,7 +82,7 @@ def check_constraints(text: str) -> tuple:
     if count == 0:
         return 0.10, "没有立场/深度/限制条件"
     if count == 1:
-        return 0.45, "只指定了一项约束，建议补全"
+        return 0.30, f"只指定了一项约束（{['角色','深度','限制'][[has_role,has_depth,has_constraint].index(True)]}），至少需要两项"
     if count == 2:
         return 0.70, "两项约束，基本够用"
     return 0.95, "约束完整"
@@ -150,11 +150,20 @@ def check_vague_refs(text: str) -> tuple:
 
 
 def scan_instruction(text: str) -> dict:
-    """扫描指令，返回加权总分 + 各维度详情。"""
-    g_score, g_hint = check_goal(text)
-    c_score, c_hint = check_constraints(text)
-    f_score, f_hint = check_format(text)
-    v_score, v_hint = check_vague_refs(text)
+    """扫描指令，返回加权总分 + 各维度详情。
+
+    每个检查函数独立 try-except，单点失败不影响其他维度。
+    """
+    def _safe_check(fn, default_score=0.0, default_hint="检查出错，降级通过"):
+        try:
+            return fn(text)
+        except Exception as e:
+            return default_score, f"{default_hint} ({type(e).__name__})"
+
+    g_score, g_hint = _safe_check(check_goal)
+    c_score, c_hint = _safe_check(check_constraints)
+    f_score, f_hint = _safe_check(check_format)
+    v_score, v_hint = _safe_check(check_vague_refs)
 
     weighted = (
         g_score * W_GOAL
@@ -255,18 +264,58 @@ def _hard_prompt(results: dict, text: str) -> str:
     return "\n\n".join(prompts) + "\n\n（必须补全后才能继续）"
 
 
+def _is_non_tech(text: str) -> bool:
+    """特征组合判断非技术场景。不再是硬编码关键词列表。
+
+    判定：人际特征 ≥3 且无技术特征 → 非技术
+          技术特征 ≥2 → 技术
+          其余 → 中性（按技术处理）
+    """
+    # 人际特征
+    interpersonal = [
+        r'朋友', r'家人', r'爸妈', r'妈妈', r'爸爸', r'同学', r'同事',
+        r'道歉', r'写信', r'回复', r'怎么说', r'帮我想想', r'怎么跟',
+        r'人情', r'关系', r'聊天', r'措辞', r'语气', r'说话',
+        r'对不起', r'不好意思', r'请假', r'约', r'聚会',
+    ]
+    # 技术特征
+    technical = [
+        r'\.py\b', r'\.js\b', r'\.json\b', r'\.yaml\b', r'\.md\b',
+        r'代码', r'脚本', r'函数', r'接口', r'配置', r'部署',
+        r'打包', r'构建', r'测试', r'程序', r'文件', r'数据库',
+    ]
+
+    inter_count = sum(1 for p in interpersonal if re.search(p, text))
+    tech_count = sum(1 for p in technical if re.search(p, text))
+
+    if inter_count >= 3 and tech_count == 0:
+        return True
+    if tech_count >= 2:
+        return False
+    return False  # 中性默认技术
+
+
+def _get_log_dir():
+    from pathlib import Path
+    d = Path.home() / ".hermes" / "logs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _check_log(message: str, detail: str = ""):
+    """运行日志"""
+    from datetime import datetime
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] {message}"
+    if detail:
+        line += f" | {detail[:200]}"
+    with open(_get_log_dir() / "check.log", "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+
 def _question_template(key: str, text: str) -> str:
     """根据缺失维度生成选项式追问。"""
-    non_tech_signals = [
-        "道歉", "写信", "回复", "怎么说", "帮我想想", "怎么跟",
-        "朋友", "家人", "爸妈", "妈妈", "爸爸", "同学", "同事",
-        "人情", "关系", "聊天", "说话", "措辞", "语气",
-    ]
-    tech_signals = [
-        "代码", "文件", ".py", ".js", "脚本", "函数", "接口",
-        "配置", "部署", "打包", "构建", "测试", ".yaml", ".json",
-    ]
-    is_non_tech = any(s in text for s in non_tech_signals) and not any(s in text for s in tech_signals)
+    is_non_tech = _is_non_tech(text)
 
     if key == "goal":
         if is_non_tech:
@@ -304,6 +353,9 @@ def main():
     results = scan_instruction(text)
     print(format_output(text, results))
     print(f"\n--- 原始指令 ---\n{text}")
+
+    # 运行日志
+    _check_log(f"action={results['action']} score={results['weighted']:.0%}", text)
 
     # HARD_BLOCK 时非零退出
     if results["action"] == "HARD_BLOCK":

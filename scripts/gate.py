@@ -10,7 +10,22 @@
 """
 
 import sys
-from collections import defaultdict
+import os
+from datetime import datetime
+from pathlib import Path
+
+LOG_DIR = Path.home() / ".hermes" / "logs"
+
+
+def _log(level: str, message: str, detail: str = ""):
+    """简单运行日志。写 ~/.hermes/logs/gate.log。"""
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] {level} {message}"
+    if detail:
+        line += f" | {detail[:200]}"
+    with open(LOG_DIR / "gate.log", "a", encoding="utf-8") as f:
+        f.write(line + "\n")
 
 
 TYPES = {
@@ -135,7 +150,23 @@ def match(task: str) -> dict:
         {"tid": "七", "name": "规则进化", "skills": [...], "first": "...",
          "confidence": 2, "matched_keywords": ["优化规则", "加固"],
          "is_modify": False, "runners_up": [("四", "优化", 1), ...]}
+
+    异常时降级：返回安全默认值（"聊天/未分类"），不崩溃。
     """
+    try:
+        return _match_inner(task)
+    except Exception as e:
+        _log("ERROR", f"match() 异常降级: {type(e).__name__}: {e}", task)
+        return {
+            "tid": "—", "name": "聊天/未分类（降级）",
+            "skills": [], "first": None,
+            "confidence": -1,
+            "matched_keywords": [f"异常:{type(e).__name__}"],
+            "is_modify": False, "runners_up": [],
+        }
+
+
+def _match_inner(task: str) -> dict:
     task_lower = task.lower()
 
     # ── 1. 编码意图组合（最高优先级）─────────────────
@@ -222,6 +253,9 @@ def main():
     else:
         print("操作: 无skill链，直接回复")
     print("============")
+
+    # 运行日志
+    _log("INFO", f"类型={result['tid']} 置信度={result['confidence']}", task)
 
 
 if __name__ == "__main__":

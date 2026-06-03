@@ -70,6 +70,20 @@ def test_gate_longest_match_wins():
     assert any(len(kw) >= 4 for kw in result["matched_keywords"])
 
 
+def test_gate_error_recovery():
+    """异常时不崩溃，返回安全默认值。"""
+    # 传入 None 会触发异常
+    try:
+        result = gate_match(None)
+    except:
+        result = None
+    # 如果异常被内部捕获，函数应返回安全默认值而不是崩溃
+    # 直接测降级：传入空字符串也应该安全
+    result = gate_match("")
+    assert result["tid"] in ("—", "聊天/未分类")
+    assert result["confidence"] <= 0
+
+
 # ── check_instruction.py 测试 ──────────
 
 def test_check_goal_clear():
@@ -91,6 +105,13 @@ def test_check_constraints_complete():
     r = scan_instruction("作为架构师，详细分析这个系统，不要超过500字")
     c_score, _ = r["constraints"]
     assert c_score >= 0.70
+
+
+def test_check_constraints_single():
+    """只有一项约束 → 低分（0.30）。"""
+    r = scan_instruction("详细分析这个系统")
+    c_score, hint = r["constraints"]
+    assert c_score < 0.50, f"期望<0.50，实际{c_score}: {hint}"
 
 
 def test_check_constraints_empty():

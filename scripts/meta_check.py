@@ -6,6 +6,11 @@
 检测是否跳过了 Gate / skill / 验证。
 跳过 → 写 pending 标注。
 
+触发机制：
+  - 自动：每次会话结束时执行（推荐）
+  - 手动：python3 meta_check.py
+  - 指定会话：python3 meta_check.py --session <ID>
+
 用法：
   python3 meta_check.py                # 检查当前会话
   python3 meta_check.py --session ID    # 指定会话

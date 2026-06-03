@@ -9,6 +9,11 @@
 2. Hermes memory 检查：超 75% → 提醒压缩
 3. Agentmemory 检查：触发自动遗忘
 
+触发机制：
+  - 自动：cron 每天执行一次（推荐）
+  - 手动：python3 forget.py
+  - 预览：python3 forget.py --dry-run
+
 用法：
   python3 forget.py           # 正常执行
   python3 forget.py --dry-run  # 只看不动
