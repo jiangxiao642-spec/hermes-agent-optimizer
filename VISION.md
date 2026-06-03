@@ -75,7 +75,22 @@ Mission 不得覆盖 Constitution：
 
 ---
 
-## P2 — 学习与治理 ⬜ 设计阶段
+## P2 — 学习与治理 🟡 部分完成
+
+### Experience Engine (`experience_engine.py`) ✅ 已落地
+
+统一学习引擎，三条管线消费 predict/forget/meta 原始输出 → 生成经验产物。
+
+```
+predict 偏差 → 聚类 → 修正因子 → factors.json
+forget 归档 → 模式提取 → if-then规则 → rules.json
+meta 违规 → 聚类 → 阈值调整 → thresholds.json
+```
+
+三个消费端 hook:
+- `predict.learn()` 读 factors.json → 置信度乘数
+- `meta.adjust_gates()` 读 thresholds.json → HARD/SOFT_BLOCK调整
+- `forget.extract_rules()` 读 rules.json → 经验规则
 
 ### Predictive Learning
 
