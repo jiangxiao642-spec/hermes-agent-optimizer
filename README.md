@@ -28,7 +28,6 @@ GOALS.md           — 权限表 ✅自主/⛔确认/🚫禁止
 护栏层             — gate_enforcer 框架级拦截 + 宪法硬约束
 ```
 
-详见 `knowledge/mirsky-ladder-architecture.md`
 
 ## 安装
 
@@ -37,6 +36,7 @@ git clone https://github.com/jiangxiao642-spec/hermes-agent-optimizer
 cp -r scripts/* ~/.hermes/scripts/
 cp -r plugins/* ~/.hermes/plugins/
 cp -r knowledge/* ~/.hermes/knowledge/
+cp rules/core-principles.md ~/.hermes/knowledge/
 cp config/skill_index.json ~/.hermes/
 
 # 配置环境变量（可选，默认用 deepseek-chat）
