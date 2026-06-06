@@ -2,28 +2,31 @@
 502 错误修复指南（跟着做就行）
 ══════════════════════════════════════════
 
-你的问题：路由中间件找不到 DeepSeek 的 API key，所以报 502。
-解决：创建一个 .env 文件，把 key 写进去。
+报错原因：路由中间件找不到 DeepSeek 的 API key，或者模型名不对。
+解决：创建一个 .env 文件，把 key 和模型名写进去。
 
-════════════════════
+════════════════
 你需要准备：
-════════════════════
+════════════════
 
 1. DeepSeek API key
    如果没有 → 去 https://platform.deepseek.com 注册账号
    注册后在「API Keys」页面创建一个 key，格式是 sk- 开头的一串字母数字
 
-════════════════════
+════════════════
 操作步骤（3步）：
-════════════════════
+════════════════
 
 【第1步】找到你下载的 hermes-agent-optimizer 文件夹
   比如你解压到了 D:\hermes-agent-optimizer
 
 【第2步】在文件夹里创建 .env 文件
-  打开记事本 → 粘贴下面这行（把 *** 替换成你的 key）：
+  打开记事本 → 粘贴下面内容（把 *** 替换成你的 key）：
 
     DEEPSEEK_API_KEY=sk-你的key
+    DEEPSEEK_MODEL=deepseek-chat
+
+  模型可选值：deepseek-chat（V3 对话）、deepseek-reasoner（R1 推理）
 
   然后点「文件 → 另存为」：
     - 保存位置：选 hermes-agent-optimizer 文件夹
@@ -37,6 +40,7 @@
     在黑色窗口里输入（替换成你的实际路径和key）：
 
     echo DEEPSEEK_API_KEY=***> D:\hermes-agent-optimizer\.env
+    echo DEEPSEEK_MODEL=deepseek-chat>> D:\hermes-agent-optimizer\.env
 
     回车，窗口关掉。
 
@@ -48,13 +52,27 @@
 
   这次应该正常启动，不会报 502 了。
 
-════════════════════
+════════════════
 验证是否成功：
-════════════════════
+════════════════
 
   看到这个就对了：
     知识路由中间件启动 → http://0.0.0.0:8000
     路由表 6 个规则
     后端 → https://api.deepseek.com/v1/chat/completions
+    模型 → deepseek-chat
 
   如果还是报错，把错误信息截图发过来。
+
+════════════════
+常见报错：
+════════════════
+
+  ❌ "DEEPSEEK_API_KEY 未找到"
+     → .env 文件没放对位置，或者 key 没写对
+
+  ❌ "model not found" 或 "invalid model"
+     → DEEPSEEK_MODEL 填错了，改成 deepseek-chat
+
+  ❌ "Connection refused"
+     → Python 依赖没装：pip install fastapi uvicorn httpx pyyaml

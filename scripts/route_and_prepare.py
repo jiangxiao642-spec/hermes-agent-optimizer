@@ -10,17 +10,24 @@
 import json
 import re
 import os
+import sys as _sys
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 app = FastAPI()
 
+# 确保 constitution.py 可在任意 CWD 被导入（模块级，线程安全）
+_SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPTS_DIR not in _sys.path:
+    _sys.path.insert(0, _SCRIPTS_DIR)
+
 HERMES_HOME = os.path.expanduser("~/.hermes")
 KNOWLEDGE_DIR = os.path.join(HERMES_HOME, "knowledge")
-DEEPSEEK_BASE = "https://api.deepseek.com/v1"
+DEEPSEEK_BASE = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
 DEEPSEEK_URL = f"{DEEPSEEK_BASE}/chat/completions"
 DEEPSEEK_TIMEOUT = 300.0
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 
 
 def _get_api_key() -> str:
@@ -63,7 +70,10 @@ def _read_key_from_env_file(path: str) -> str:
     return ""
 
 
-DEEPSEEK_KEY = _get_api_key()
+# API key 延迟加载——不在模块导入时读，避免 .env 还没创建就固定为空
+def _load_api_key() -> str:
+    """每次请求前重新读取 API key（支持 .env 热更新，无缓存）"""
+    return _get_api_key()
 
 # ── 关键词路由表 ──────────────────────────────
 KNOWLEDGE_ROUTING = {
@@ -188,17 +198,19 @@ def inject_knowledge(messages: list[dict], knowledge_text: str) -> list[dict]:
 
 
 async def forward_to_deepseek(messages: list[dict], **kwargs) -> dict:
-    """转发请求到 DeepSeek API。"""
+    """转发请求到 DeepSeek API，支持 stream 和非 stream 两种模式。"""
+    key = _load_api_key()
     headers = {
-        "Authorization": f"Bearer {DEEPSEEK_KEY}",
+        "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
     }
+    stream = kwargs.get("stream", False)
     payload = {
-        "model": kwargs.get("model", "deepseek-v4-pro"),
+        "model": kwargs.get("model", DEEPSEEK_MODEL),
         "messages": messages,
         "temperature": kwargs.get("temperature", 0.7),
         "max_tokens": kwargs.get("max_tokens", 8192),
-        "stream": False,
+        "stream": stream,
     }
     async with httpx.AsyncClient(timeout=DEEPSEEK_TIMEOUT) as client:
         resp = await client.post(DEEPSEEK_URL, json=payload, headers=headers)
@@ -206,14 +218,36 @@ async def forward_to_deepseek(messages: list[dict], **kwargs) -> dict:
         return resp.json()
 
 
+async def _forward_stream(messages: list[dict], **kwargs) -> any:
+    """SSE 流式代理——逐块转发 DeepSeek 的 text/event-stream 响应。"""
+    key = _load_api_key()
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": kwargs.get("model", DEEPSEEK_MODEL),
+        "messages": messages,
+        "temperature": kwargs.get("temperature", 0.7),
+        "max_tokens": kwargs.get("max_tokens", 8192),
+        "stream": True,
+    }
+    async with httpx.AsyncClient(timeout=DEEPSEEK_TIMEOUT) as client:
+        async with client.stream("POST", DEEPSEEK_URL, json=payload, headers=headers) as resp:
+            resp.raise_for_status()
+            async for chunk in resp.aiter_bytes():
+                yield chunk
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     """主拦截端点 —— 兼容 OpenAI API 格式。
 
-    管道：路由→注入→转发→Constitution闸门→返回
+    管道：路由→注入→转发→Constitution闸门（仅非stream）→返回
     """
     body = await request.json()
     messages = body.get("messages", [])
+    stream = body.get("stream", False)
 
     if not messages:
         return JSONResponse({"error": "no messages"}, status_code=400)
@@ -232,25 +266,38 @@ async def chat_completions(request: Request):
 
     # 转发后端
     try:
+        if stream:
+            # SSE 流式——直传，不做 constitution 检查
+            return StreamingResponse(
+                _forward_stream(
+                    injected,
+                    model=body.get("model", DEEPSEEK_MODEL),
+                    temperature=body.get("temperature", 0.7),
+                    max_tokens=body.get("max_tokens", 8192),
+                ),
+                media_type="text/event-stream",
+            )
         result = await forward_to_deepseek(
             injected,
-            model=body.get("model", "deepseek-v4-pro"),
+            model=body.get("model", DEEPSEEK_MODEL),
             temperature=body.get("temperature", 0.7),
             max_tokens=body.get("max_tokens", 8192),
         )
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=502)
+    except Exception:
+        # 不泄露后端异常细节给客户端
+        return JSONResponse({"error": "backend request failed"}, status_code=502)
 
-    # ── 输出闸门：Constitution Layer ──
-    assistant_text = _extract_assistant_text(result)
-    if assistant_text:
-        gate_result = _run_constitution_gate(assistant_text)
-        if gate_result["blocked"]:
-            warning = _format_gate_warning(gate_result)
-            result = _prefix_assistant_text(result, warning)
+    # ── 输出闸门：Constitution Layer（stream 模式跳过语义检查）──
+    if not stream:
+        assistant_text = _extract_assistant_text(result)
+        if assistant_text:
+            gate_result = await _run_constitution_gate(assistant_text)
+            if gate_result["blocked"]:
+                warning = _format_gate_warning(gate_result)
+                result = _prefix_assistant_text(result, warning)
 
-        # 记录输出到日志（供 experience_engine 消费）
-        _log_output(user_msg, assistant_text, gate_result)
+            # 记录输出到日志（供 experience_engine 消费）
+            _log_output(user_msg, assistant_text, gate_result)
 
     return JSONResponse(result)
 
@@ -273,15 +320,22 @@ def _prefix_assistant_text(result: dict, prefix: str) -> dict:
     return result
 
 
-def _run_constitution_gate(text: str) -> dict:
-    """运行宪法闸门——正则 + 语义双层。"""
+async def _run_constitution_gate(text: str) -> dict:
+    """运行宪法闸门——正则 + 语义双层（异步，不阻塞 event loop）。"""
+    import asyncio
+    return await asyncio.to_thread(_run_constitution_gate_sync, text)
+
+
+def _run_constitution_gate_sync(text: str) -> dict:
+    """宪法闸门同步实现。sys.path 已在模块级初始化，不依赖 CWD。"""
     try:
-        from scripts.constitution import Constitution
+        from constitution import Constitution  # type: ignore
         c = Constitution()
-        return c.full_check(text, DEEPSEEK_KEY)
-    except Exception as e:
+        return c.full_check(text, _load_api_key())
+    except Exception:
+        # 宪法检查崩溃 → fail-open（不阻断正常对话）
         return {"blocked": False, "layer": "error", "violations": [],
-                "semantic": {"verdict": "SKIP", "reason": str(e)[:50]}}
+                "semantic": {"verdict": "SKIP", "reason": "constitution check failed"}}
 
 
 def _format_gate_warning(gate_result: dict) -> str:
@@ -297,22 +351,26 @@ def _format_gate_warning(gate_result: dict) -> str:
 
 
 def _log_output(user_msg: str, assistant_text: str, gate_result: dict):
-    """写输出日志。"""
-    from datetime import datetime
-    log_dir = os.path.join(HERMES_HOME, "logs")
-    os.makedirs(log_dir, exist_ok=True)
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    status = "BLOCKED" if gate_result.get("blocked") else "PASS"
-    layer = gate_result.get("layer", "?")
-    with open(os.path.join(log_dir, "output_gate.log"), "a", encoding="utf-8") as f:
-        f.write(f"[{ts}] {status}:{layer} | user={user_msg[:100]} | ai={assistant_text[:200]}\n")
+    """写输出日志。异常静默跳过——日志崩了不应连坐请求。"""
+    try:
+        from datetime import datetime
+        log_dir = os.path.join(HERMES_HOME, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        status = "BLOCKED" if gate_result.get("blocked") else "PASS"
+        layer = gate_result.get("layer", "?")
+        with open(os.path.join(log_dir, "output_gate.log"), "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] {status}:{layer} | user={user_msg[:100]} | ai={assistant_text[:200]}\n")
+    except Exception:
+        pass  # 日志写入失败不连坐请求
 
 
 @app.get("/v1/models")
 async def models():
     """透传模型列表（含 context_window）。"""
     try:
-        headers = {"Authorization": f"Bearer {DEEPSEEK_KEY}"}
+        key = _load_api_key()
+        headers = {"Authorization": f"Bearer {key}"}
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(
                 f"{DEEPSEEK_BASE}/models", headers=headers
@@ -334,10 +392,12 @@ async def health():
 
 if __name__ == "__main__":
     import uvicorn
+    key = _load_api_key()
     print("知识路由中间件启动 → http://0.0.0.0:8000")
     print(f"路由表 {len(KNOWLEDGE_ROUTING)} 个规则")
     print(f"后端 → {DEEPSEEK_URL}")
-    if not DEEPSEEK_KEY:
+    print(f"模型 → {DEEPSEEK_MODEL}")
+    if not key:
         print("=" * 60)
         print("❌ DEEPSEEK_API_KEY 未找到！")
         print("")

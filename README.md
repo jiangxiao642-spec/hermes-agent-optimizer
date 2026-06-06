@@ -39,6 +39,10 @@ cp -r plugins/* ~/.hermes/plugins/
 cp -r knowledge/* ~/.hermes/knowledge/
 cp config/skill_index.json ~/.hermes/
 
+# 配置环境变量（可选，默认用 deepseek-chat）
+# DEEPSEEK_MODEL=deepseek-chat     # 模型名（deepseek-chat / deepseek-reasoner）
+# DEEPSEEK_BASE_URL=https://api.deepseek.com/v1  # API 地址
+
 # 启用 gate_enforcer 插件
 hermes plugins enable gate_enforcer
 hermes gateway restart

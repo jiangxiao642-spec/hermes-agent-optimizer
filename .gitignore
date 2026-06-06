@@ -1,1 +1,4 @@
 __pycache__/
+.env
+*.log
+# ~/.hermes/experience/ 不在仓库内，无需 gitignore
