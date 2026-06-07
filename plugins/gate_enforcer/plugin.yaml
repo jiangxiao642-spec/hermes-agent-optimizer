@@ -1,6 +1,0 @@
-name: gate_enforcer
-version: "1.0"
-description: "Pre-tool-call hook — blocks tool execution if Gate hasn't been passed this session"
-author: "Agent"
-hooks:
-  - pre_tool_call
