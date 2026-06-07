@@ -97,6 +97,9 @@ if __name__ == "__main__":
         sys.exit(1)
 
     if sys.argv[1] == "--load":
+        if len(sys.argv) < 3:
+            print("用法: tool_search.py --load skill-name")
+            sys.exit(1)
         name = sys.argv[2]
         path = get_skill_path(name)
         if path:

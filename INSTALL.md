@@ -18,7 +18,7 @@ cd hermes-agent-optimizer
 ### 2. 安装 Python 依赖
 
 ```bash
-pip install fastapi uvicorn httpx pyyaml --break-system-packages
+pip install -r requirements.txt
 ```
 
 ### 3. 部署文件
@@ -35,13 +35,28 @@ cp knowledge/*.md ~/.hermes/knowledge/
 cp rules/core-principles.md ~/.hermes/knowledge/
 ```
 
-### 4. 安装 systemd 服务
+### 4. 启动路由中间件
+
+**Linux (systemd)：**
 
 ```bash
 mkdir -p ~/.config/systemd/user/
 cp config/systemd/hermes-router.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now hermes-router.service
+```
+
+**macOS / 无 systemd：**
+
+```bash
+# 方式 A：手动启动（前台）
+python3 ~/.hermes/scripts/route_and_prepare.py
+
+# 方式 B：后台运行
+nohup python3 ~/.hermes/scripts/route_and_prepare.py > /tmp/hermes-router.log 2>&1 &
+
+# 方式 C：launchd（开机自启）
+# 参考 config/systemd/hermes-router.service 改写成 .plist 放到 ~/Library/LaunchAgents/
 ```
 
 ### 5. 验证
